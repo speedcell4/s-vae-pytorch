@@ -1,3 +1,4 @@
+from collections import defaultdict
 
 import numpy as np
 import torch
@@ -6,20 +7,17 @@ import torch.nn.functional as F
 import torch.optim as optim
 import torch.utils.data
 from torchvision import datasets, transforms
-from collections import defaultdict
 
-from hyperspherical_vae.distributions import VonMisesFisher
-from hyperspherical_vae.distributions import HypersphericalUniform
-
+from hyperspherical_vae.distributions import HypersphericalUniform, VonMisesFisher
 
 train_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=True, download=True,
-    transform=transforms.ToTensor()), batch_size=64, shuffle=True)
+                                                          transform=transforms.ToTensor()), batch_size=64, shuffle=True)
 test_loader = torch.utils.data.DataLoader(datasets.MNIST('./data', train=False, download=True,
-    transform=transforms.ToTensor()), batch_size=64)
+                                                         transform=transforms.ToTensor()), batch_size=64)
 
 
 class ModelVAE(torch.nn.Module):
-    
+
     def __init__(self, h_dim, z_dim, activation=F.relu, distribution='normal'):
         """
         ModelVAE initializer
@@ -29,9 +27,9 @@ class ModelVAE(torch.nn.Module):
         :param distribution: string either `normal` or `vmf`, indicates which distribution to use
         """
         super(ModelVAE, self).__init__()
-        
+
         self.z_dim, self.activation, self.distribution = z_dim, activation, distribution
-        
+
         # 2 hidden layers encoder
         self.fc_e0 = nn.Linear(784, h_dim * 2)
         self.fc_e1 = nn.Linear(h_dim * 2, h_dim)
@@ -39,14 +37,14 @@ class ModelVAE(torch.nn.Module):
         if self.distribution == 'normal':
             # compute mean and std of the normal distribution
             self.fc_mean = nn.Linear(h_dim, z_dim)
-            self.fc_var =  nn.Linear(h_dim, z_dim)
+            self.fc_var = nn.Linear(h_dim, z_dim)
         elif self.distribution == 'vmf':
             # compute mean and concentration of the von Mises-Fisher
             self.fc_mean = nn.Linear(h_dim, z_dim)
             self.fc_var = nn.Linear(h_dim, 1)
         else:
             raise NotImplemented
-            
+
         # 2 hidden layers decoder
         self.fc_d0 = nn.Linear(z_dim, h_dim)
         self.fc_d1 = nn.Linear(h_dim, h_dim * 2)
@@ -56,7 +54,7 @@ class ModelVAE(torch.nn.Module):
         # 2 hidden layers encoder
         x = self.activation(self.fc_e0(x))
         x = self.activation(self.fc_e1(x))
-        
+
         if self.distribution == 'normal':
             # compute mean and std of the normal distribution
             z_mean = self.fc_mean(x)
@@ -69,17 +67,17 @@ class ModelVAE(torch.nn.Module):
             z_var = F.softplus(self.fc_var(x)) + 1
         else:
             raise NotImplemented
-        
+
         return z_mean, z_var
-        
+
     def decode(self, z):
-        
+
         x = self.activation(self.fc_d0(z))
         x = self.activation(self.fc_d1(x))
         x = self.fc_logits(x)
-        
+
         return x
-        
+
     def reparameterize(self, z_mean, z_var):
         if self.distribution == 'normal':
             q_z = torch.distributions.normal.Normal(z_mean, z_var)
@@ -91,16 +89,16 @@ class ModelVAE(torch.nn.Module):
             raise NotImplemented
 
         return q_z, p_z
-        
-    def forward(self, x): 
+
+    def forward(self, x):
         z_mean, z_var = self.encode(x)
         q_z, p_z = self.reparameterize(z_mean, z_var)
         z = q_z.rsample()
         x_ = self.decode(z)
-        
+
         return (z_mean, z_var), (q_z, p_z), z, x_
-    
-    
+
+
 def log_likelihood(model, x, n=10):
     """
     :param model: model object
@@ -132,50 +130,51 @@ def log_likelihood(model, x, n=10):
 def train(model, optimizer):
     for i, (x_mb, y_mb) in enumerate(train_loader):
 
-            optimizer.zero_grad()
-            
-            # dynamic binarization
-            x_mb = (x_mb > torch.distributions.Uniform(0, 1).sample(x_mb.shape)).float()
+        optimizer.zero_grad()
 
-            _, (q_z, p_z), _, x_mb_ = model(x_mb.reshape(-1, 784))
+        # dynamic binarization
+        x_mb = (x_mb > torch.distributions.Uniform(0, 1).sample(x_mb.shape)).float()
 
-            loss_recon = nn.BCEWithLogitsLoss(reduction='none')(x_mb_, x_mb.reshape(-1, 784)).sum(-1).mean()
+        _, (q_z, p_z), _, x_mb_ = model(x_mb.reshape(-1, 784))
 
-            if model.distribution == 'normal':
-                loss_KL = torch.distributions.kl.kl_divergence(q_z, p_z).sum(-1).mean()
-            elif model.distribution == 'vmf':
-                loss_KL = torch.distributions.kl.kl_divergence(q_z, p_z).mean()
-            else:
-                raise NotImplemented
+        loss_recon = nn.BCEWithLogitsLoss(reduction='none')(x_mb_, x_mb.reshape(-1, 784)).sum(-1).mean()
 
-            loss = loss_recon + loss_KL
+        if model.distribution == 'normal':
+            loss_KL = torch.distributions.kl.kl_divergence(q_z, p_z).sum(-1).mean()
+        elif model.distribution == 'vmf':
+            loss_KL = torch.distributions.kl.kl_divergence(q_z, p_z).mean()
+        else:
+            raise NotImplemented
 
-            loss.backward()
-            optimizer.step()
-            
-            
+        loss = loss_recon + loss_KL
+
+        loss.backward()
+        optimizer.step()
+
+
 def test(model, optimizer):
     print_ = defaultdict(list)
     for x_mb, y_mb in test_loader:
-        
+
         # dynamic binarization
         x_mb = (x_mb > torch.distributions.Uniform(0, 1).sample(x_mb.shape)).float()
-        
+
         _, (q_z, p_z), _, x_mb_ = model(x_mb.reshape(-1, 784))
-        
+
         print_['recon loss'].append(float(nn.BCEWithLogitsLoss(reduction='none')(x_mb_,
-            x_mb.reshape(-1, 784)).sum(-1).mean().data))
-        
+                                                                                 x_mb.reshape(-1, 784)).sum(
+            -1).mean().data))
+
         if model.distribution == 'normal':
             print_['KL'].append(float(torch.distributions.kl.kl_divergence(q_z, p_z).sum(-1).mean().data))
         elif model.distribution == 'vmf':
             print_['KL'].append(float(torch.distributions.kl.kl_divergence(q_z, p_z).mean().data))
         else:
             raise NotImplemented
-        
+
         print_['ELBO'].append(- print_['recon loss'][-1] - print_['KL'][-1])
         print_['LL'].append(float(log_likelihood(model, x_mb).data))
-    
+
     print({k: np.mean(v) for k, v in print_.items()})
 
 

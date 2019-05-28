@@ -9,7 +9,7 @@ This library contains a Pytorch implementation of the hyperspherical variational
 ## Dependencies
 
 * **python>=3.6**
-* **pytorch>=0.4.1**: https://pytorch.org
+* **pytorch>=1.1.0**: https://pytorch.org
 * **scipy**: https://scipy.org
 * **numpy**: https://www.numpy.org
 

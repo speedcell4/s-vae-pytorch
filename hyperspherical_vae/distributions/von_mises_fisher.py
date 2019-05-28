@@ -1,9 +1,10 @@
 import math
+
 import torch
 from torch.distributions.kl import register_kl
 
-from hyperspherical_vae.ops.ive import ive
 from hyperspherical_vae.distributions.hyperspherical_uniform import HypersphericalUniform
+from hyperspherical_vae.ops.ive import ive
 
 
 class VonMisesFisher(torch.distributions.Distribution):
@@ -28,7 +29,7 @@ class VonMisesFisher(torch.distributions.Distribution):
         self.scale = scale
         self.device = loc.device
         self.__m = loc.shape[-1]
-        self.__e1 = (torch.Tensor([1.] + [0] * (loc.shape[-1] - 1))).to(self.device)
+        self.__e1 = (torch.tensor([1.] + [0] * (loc.shape[-1] - 1))).to(self.device)
 
         super(VonMisesFisher, self).__init__(self.loc.size(), validate_args=validate_args)
 
